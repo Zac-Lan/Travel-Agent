@@ -54,7 +54,7 @@
     import { 
       Home, ListTodo, Map, CalendarDays, Plus, Trash2, CheckSquare, Square, 
       Navigation, Train, Plane, Bus, Car, Footprints, Pencil, PlaneTakeoff, 
-      PlaneLanding, Bed, Calendar, MapPin, Save, X, RotateCcw, LogOut, User, Lock
+      PlaneLanding, Bed, Calendar, MapPin, Save, X, RotateCcw, LogOut, User, Lock, KeyRound
     } from 'lucide-react';
 
     // --- Firebase 雲端環境設定 ---
@@ -140,18 +140,31 @@
       }
     };
 
-    // --- 登入與註冊畫面元件 (改為「通關密碼」機制，支援所有環境) ---
-    const AuthScreen = ({ appState, onSetup, onLoginAdmin, onGuest }) => {
+    // --- 登入與註冊畫面元件 (支援重設密碼) ---
+    const AuthScreen = ({ appState, onSetup, onLoginAdmin, onGuest, onResetPasscode }) => {
       const [passcode, setPasscode] = useState('');
       const [error, setError] = useState('');
       const [loading, setLoading] = useState(false);
+      const [isResetting, setIsResetting] = useState(false);
+      const [newPasscode, setNewPasscode] = useState('');
+      const [confirmPasscode, setConfirmPasscode] = useState('');
 
       const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
         setLoading(true);
         try {
-          if (appState === 'setup') {
+          if (isResetting) {
+            if (newPasscode.length < 4) throw new Error('密碼長度至少需要 4 個字元');
+            if (newPasscode !== confirmPasscode) throw new Error('兩次輸入的密碼不一致');
+            await onResetPasscode(newPasscode);
+            setIsResetting(false);
+            setPasscode('');
+            setNewPasscode('');
+            setConfirmPasscode('');
+            setError('密碼重設成功，請重新登入');
+            setTimeout(() => setError(''), 3000);
+          } else if (appState === 'setup') {
             if (passcode.length < 4) throw new Error('密碼長度至少需要 4 個字元');
             await onSetup(passcode);
           } else if (appState === 'login') {
@@ -159,7 +172,7 @@
             await onLoginAdmin(passcode);
           }
         } catch (err) {
-          setError(err.message || "密碼錯誤或發生異常");
+          setError(err.message || "發生異常");
         } finally {
           setLoading(false);
         }
@@ -171,34 +184,70 @@
             <div className="absolute top-0 inset-x-0 h-2 bg-indigo-600"></div>
             <div className="flex justify-center mb-6">
               <div className="bg-indigo-100 p-3 rounded-2xl text-indigo-600">
-                <Map size={32} />
+                {isResetting ? <KeyRound size={32} /> : <Map size={32} />}
               </div>
             </div>
             <h2 className="text-2xl font-bold text-gray-800 mb-2 text-center">
-              {appState === 'setup' ? '初始化旅程空間' : '登入旅行手冊'}
+              {isResetting ? '重設管理員密碼' : (appState === 'setup' ? '初始化旅程空間' : '登入旅行手冊')}
             </h2>
             <p className="text-center text-sm text-gray-500 mb-6">
-              {appState === 'setup' ? '為這趟旅程設定一組「管理員密碼」' : '輸入密碼以編輯行程，或以訪客身份進入'}
+              {isResetting ? '請設定一組新的密碼' : (appState === 'setup' ? '為這趟旅程設定一組「管理員密碼」' : '輸入密碼以編輯行程，或以訪客身份進入')}
             </p>
             
-            {error && <div className="bg-red-50 text-red-500 p-3 rounded-xl text-sm mb-4 border border-red-100 text-center font-medium">{error}</div>}
+            {error && <div className={`bg-${error.includes('成功') ? 'emerald' : 'red'}-50 text-${error.includes('成功') ? 'emerald' : 'red'}-500 p-3 rounded-xl text-sm mb-4 border border-${error.includes('成功') ? 'emerald' : 'red'}-100 text-center font-medium`}>{error}</div>}
             
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-gray-500 mb-1 ml-1">
-                  {appState === 'setup' ? '設定管理員密碼' : '管理員密碼'}
-                </label>
-                <div className="relative">
-                  <Lock size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                  <input type="password" value={passcode} onChange={e=>setPasscode(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors" placeholder={appState === 'setup' ? "至少 4 個字元" : "請輸入密碼"} />
+              {isResetting ? (
+                <>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-500 mb-1 ml-1">新密碼</label>
+                    <div className="relative">
+                      <Lock size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                      <input type="password" value={newPasscode} onChange={e=>setNewPasscode(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors" placeholder="至少 4 個字元" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-500 mb-1 ml-1">確認新密碼</label>
+                    <div className="relative">
+                      <Lock size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                      <input type="password" value={confirmPasscode} onChange={e=>setConfirmPasscode(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors" placeholder="再次輸入新密碼" />
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 mb-1 ml-1">
+                    {appState === 'setup' ? '設定管理員密碼' : '管理員密碼'}
+                  </label>
+                  <div className="relative">
+                    <Lock size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input type="password" value={passcode} onChange={e=>setPasscode(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors" placeholder={appState === 'setup' ? "至少 4 個字元" : "請輸入密碼"} />
+                  </div>
                 </div>
-              </div>
+              )}
+              
               <button type="submit" disabled={loading} className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700 transition-colors mt-2 shadow-md shadow-indigo-200 flex justify-center">
-                {loading ? <span className="animate-pulse">處理中...</span> : (appState === 'setup' ? '創建旅程' : '登入管理員')}
+                {loading ? <span className="animate-pulse">處理中...</span> : (isResetting ? '確認重設' : (appState === 'setup' ? '創建旅程' : '登入管理員'))}
               </button>
             </form>
 
-            {appState === 'login' && (
+            {appState === 'login' && !isResetting && (
+              <div className="mt-4 text-center">
+                <button onClick={() => { setIsResetting(true); setError(''); }} type="button" className="text-xs text-indigo-500 hover:text-indigo-700 font-medium transition-colors">
+                  忘記密碼？點此重設
+                </button>
+              </div>
+            )}
+
+            {isResetting && (
+               <div className="mt-4 text-center">
+                <button onClick={() => { setIsResetting(false); setError(''); }} type="button" className="text-xs text-gray-500 hover:text-gray-700 font-medium transition-colors">
+                  返回登入
+                </button>
+              </div>
+            )}
+
+            {appState === 'login' && !isResetting && (
               <div className="mt-6 text-center">
                 <div className="relative flex py-2 items-center">
                   <div className="flex-grow border-t border-gray-200"></div>
@@ -356,6 +405,16 @@
         }
       };
 
+      // 處理重設密碼
+      const handleResetPasscode = async (newPasscode) => {
+          if (!isCloudAvailable) return;
+          const sharedDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'travel_app_data', 'main_trip');
+          await updateDoc(sharedDocRef, {
+              passcode: newPasscode
+          });
+          setDbPasscode(newPasscode);
+      }
+
       // 登出或重置狀態
       const handleLogout = async () => {
         if (window.confirm("確定要退出目前身份嗎？")) {
@@ -383,7 +442,7 @@
 
       // --- 畫面渲染分支 ---
       if (authInitialized && (appState === 'setup' || appState === 'login')) {
-        return <AuthScreen appState={appState} onSetup={handleSetup} onLoginAdmin={handleLoginAdmin} onGuest={() => setGuestMode(true)} />;
+        return <AuthScreen appState={appState} onSetup={handleSetup} onLoginAdmin={handleLoginAdmin} onGuest={() => setGuestMode(true)} onResetPasscode={handleResetPasscode} />;
       }
 
       if (!authInitialized || appState === 'loading') {
