@@ -63,15 +63,33 @@
     import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
     import { getFirestore, doc, onSnapshot, setDoc } from 'firebase/firestore';
 
+    // 💡 如果您要將 App 部署到 GitHub Pages 並啟用雲端儲存功能，
+    // 請前往 Firebase Console (https://console.firebase.google.com/) 建立專案，
+    // 並將您的 Web 應用程式設定 (firebaseConfig) 貼到下方：
+    const myFirebaseConfig = {
+      apiKey: "請填入您的_API_KEY",
+      authDomain: "請填入您的_AUTH_DOMAIN",
+      projectId: "請填入您的_PROJECT_ID",
+      storageBucket: "請填入您的_STORAGE_BUCKET",
+      messagingSenderId: "請填入您的_MESSAGING_SENDER_ID",
+      appId: "請填入您的_APP_ID"
+    };
+
     let app, auth, db, appId;
-    const isCloudAvailable = typeof __firebase_config !== 'undefined';
+    
+    // 自動判斷是在預覽環境，還是您自行部屬的 GitHub Pages 環境
+    const injectedConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+    const isCustomConfigSet = myFirebaseConfig.apiKey && myFirebaseConfig.apiKey !== "請填入您的_API_KEY";
+    const isCloudAvailable = injectedConfig || isCustomConfigSet;
+
     if (isCloudAvailable) {
       try {
-        const firebaseConfig = JSON.parse(__firebase_config);
-        app = initializeApp(firebaseConfig);
+        const activeConfig = injectedConfig || myFirebaseConfig;
+        app = initializeApp(activeConfig);
         auth = getAuth(app);
         db = getFirestore(app);
-        appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        // 如果是自行部署，給予一個專屬的 App ID 資料夾名稱
+        appId = typeof __app_id !== 'undefined' ? __app_id : 'my-custom-travel-app';
       } catch (e) {
         console.error("Firebase 初始化失敗:", e);
       }
@@ -870,6 +888,10 @@
         const [selectedDay, setSelectedDay] = useState(1);
         const [isAdding, setIsAdding] = useState(false);
         const [newAct, setNewAct] = useState({ time: '', title: '', desc: '', transportToNext: '', transportIcon: 'walk' });
+        
+        // 編輯既有行程的狀態
+        const [editingActId, setEditingActId] = useState(null);
+        const [editActData, setEditActData] = useState({ time: '', title: '', desc: '', transportToNext: '', transportIcon: 'walk' });
 
         useEffect(() => {
           if (summary.length > 0 && !summary.find(s => s.day === selectedDay)) {
@@ -914,6 +936,32 @@
           setItinerary(itinerary.map(d => d.day === dayId ? { ...d, activities: d.activities.filter(a => a.id !== actId) } : d));
         };
 
+        // 啟動編輯模式
+        const startEditActivity = (act) => {
+          setEditingActId(act.id);
+          setEditActData({ ...act });
+        };
+
+        // 儲存編輯結果
+        const handleSaveEditActivity = () => {
+          if (!editActData.title || !editActData.time) return;
+
+          const updatedItinerary = [...itinerary];
+          const dayIndex = updatedItinerary.findIndex(d => d.day === currentSummary.day);
+
+          if (dayIndex !== -1) {
+            const actIndex = updatedItinerary[dayIndex].activities.findIndex(a => a.id === editingActId);
+            if (actIndex !== -1) {
+              updatedItinerary[dayIndex].activities[actIndex] = { ...editActData, id: editingActId };
+              // 重新根據時間排序
+              updatedItinerary[dayIndex].activities.sort((a, b) => a.time.localeCompare(b.time));
+            }
+          }
+
+          setItinerary(updatedItinerary);
+          setEditingActId(null);
+        };
+
         return (
           <div className="flex flex-col h-full bg-gray-50 animate-fade-in">
             <div className="bg-white px-4 py-3 shadow-sm z-10 sticky top-0 flex gap-2 overflow-x-auto no-scrollbar">
@@ -946,24 +994,65 @@
                 ) : (
                   currentDayData.activities.map((act, index) => (
                     <div key={act.id} className="relative">
-                      <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 relative z-10 flex gap-4 group">
-                        <div className="flex flex-col items-center">
-                          <div className="bg-indigo-50 text-indigo-700 font-bold px-2 py-1 rounded-md text-sm whitespace-nowrap">
-                            {act.time}
+                      
+                      {/* 判斷是否為編輯模式 */}
+                      {editingActId === act.id ? (
+                        <div className="bg-white rounded-2xl p-4 shadow-md border-2 border-indigo-300 relative z-10 my-2 animate-fade-in">
+                          <h4 className="text-sm font-bold text-indigo-800 mb-3 flex items-center gap-1">
+                            <Pencil size={16} /> 編輯行程
+                          </h4>
+                          <div className="space-y-3">
+                            <div className="flex gap-3">
+                              <input type="time" value={editActData.time} onChange={e => setEditActData({...editActData, time: e.target.value})} className="px-3 py-2 rounded-lg border border-gray-200 text-sm flex-shrink-0" required />
+                              <input type="text" placeholder="地點 / 標題" value={editActData.title} onChange={e => setEditActData({...editActData, title: e.target.value})} className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-gray-200 text-sm" required />
+                            </div>
+                            <textarea placeholder="活動簡介或備註..." value={editActData.desc} onChange={e => setEditActData({...editActData, desc: e.target.value})} className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm resize-none h-20" />
+                            
+                            <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
+                              <label className="text-xs font-bold text-gray-500 mb-2 block">前往下一個地點的交通方式 (選填)</label>
+                              <div className="flex flex-col sm:flex-row gap-2">
+                                <select value={editActData.transportIcon} onChange={e => setEditActData({...editActData, transportIcon: e.target.value})} className="px-2 py-2 rounded-lg border border-gray-200 text-sm bg-white shrink-0">
+                                  <option value="walk">步行</option>
+                                  <option value="train">火車/地鐵</option>
+                                  <option value="bus">巴士</option>
+                                  <option value="car">汽車/計程車</option>
+                                  <option value="plane">飛機</option>
+                                </select>
+                                <input type="text" placeholder="例如：搭乘地鐵轉乘公車 (約30分)" value={editActData.transportToNext} onChange={e => setEditActData({...editActData, transportToNext: e.target.value})} className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white" />
+                              </div>
+                            </div>
+
+                            <div className="flex gap-2 pt-2">
+                              <button onClick={handleSaveEditActivity} className="flex-1 bg-indigo-600 text-white py-2 rounded-lg text-sm font-bold hover:bg-indigo-700 transition-colors">儲存修改</button>
+                              <button onClick={() => setEditingActId(null)} className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-bold hover:bg-gray-300 transition-colors">取消</button>
+                            </div>
                           </div>
                         </div>
-                        <div className="flex-1 pb-1">
-                          <h3 className="text-lg font-bold text-gray-800 mb-1 flex justify-between items-start">
-                            {act.title}
-                            <button onClick={() => removeActivity(currentSummary.day, act.id)} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <Trash2 size={16} />
-                            </button>
-                          </h3>
-                          {act.desc && <p className="text-gray-600 text-sm leading-relaxed mb-2">{act.desc}</p>}
+                      ) : (
+                        <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 relative z-10 flex gap-4 group">
+                          <div className="flex flex-col items-center">
+                            <div className="bg-indigo-50 text-indigo-700 font-bold px-2 py-1 rounded-md text-sm whitespace-nowrap">
+                              {act.time}
+                            </div>
+                          </div>
+                          <div className="flex-1 pb-1">
+                            <h3 className="text-lg font-bold text-gray-800 mb-1 flex justify-between items-start">
+                              {act.title}
+                              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button onClick={() => startEditActivity(act)} className="text-gray-300 hover:text-indigo-500 p-1">
+                                  <Pencil size={16} />
+                                </button>
+                                <button onClick={() => removeActivity(currentSummary.day, act.id)} className="text-gray-300 hover:text-red-500 p-1">
+                                  <Trash2 size={16} />
+                                </button>
+                              </div>
+                            </h3>
+                            {act.desc && <p className="text-gray-600 text-sm leading-relaxed mb-2">{act.desc}</p>}
+                          </div>
                         </div>
-                      </div>
+                      )}
 
-                      {(act.transportToNext || index < currentDayData.activities.length - 1) && (
+                      {(act.transportToNext || index < currentDayData.activities.length - 1) && editingActId !== act.id && (
                         <div className="relative pl-8 py-3 my-1">
                           <div className="absolute left-[39px] top-0 bottom-0 w-0.5 bg-gray-200 z-0"></div>
                           {act.transportToNext && (
@@ -985,21 +1074,21 @@
                   <div className="space-y-3">
                     <div className="flex gap-3">
                       <input type="time" value={newAct.time} onChange={e => setNewAct({...newAct, time: e.target.value})} className="px-3 py-2 rounded-lg border border-gray-200 text-sm flex-shrink-0" required />
-                      <input type="text" placeholder="地點 / 標題" value={newAct.title} onChange={e => setNewAct({...newAct, title: e.target.value})} className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm" required />
+                      <input type="text" placeholder="地點 / 標題" value={newAct.title} onChange={e => setNewAct({...newAct, title: e.target.value})} className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-gray-200 text-sm" required />
                     </div>
                     <textarea placeholder="活動簡介或備註..." value={newAct.desc} onChange={e => setNewAct({...newAct, desc: e.target.value})} className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm resize-none h-20" />
                     
                     <div className="bg-white p-3 rounded-lg border border-gray-200">
                       <label className="text-xs font-bold text-gray-500 mb-2 block">前往下一個地點的交通方式 (選填)</label>
-                      <div className="flex gap-2">
-                        <select value={newAct.transportIcon} onChange={e => setNewAct({...newAct, transportIcon: e.target.value})} className="px-2 py-2 rounded-lg border border-gray-200 text-sm bg-gray-50">
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <select value={newAct.transportIcon} onChange={e => setNewAct({...newAct, transportIcon: e.target.value})} className="px-2 py-2 rounded-lg border border-gray-200 text-sm bg-gray-50 shrink-0">
                           <option value="walk">步行</option>
                           <option value="train">火車/地鐵</option>
                           <option value="bus">巴士</option>
                           <option value="car">汽車/計程車</option>
                           <option value="plane">飛機</option>
                         </select>
-                        <input type="text" placeholder="例如：搭乘地鐵轉乘公車 (約30分)" value={newAct.transportToNext} onChange={e => setNewAct({...newAct, transportToNext: e.target.value})} className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+                        <input type="text" placeholder="例如：搭乘地鐵轉乘公車 (約30分)" value={newAct.transportToNext} onChange={e => setNewAct({...newAct, transportToNext: e.target.value})} className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-gray-200 text-sm" />
                       </div>
                     </div>
 
