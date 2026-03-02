@@ -59,8 +59,8 @@
 
     // --- Firebase 雲端環境設定 ---
     import { initializeApp } from 'firebase/app';
-    import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, signOut } from 'firebase/auth';
-    import { getFirestore, doc, onSnapshot, setDoc, updateDoc, arrayUnion } from 'firebase/firestore';
+    import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+    import { getFirestore, doc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
 
     // 💡 GitHub Pages 部署請在此填入 Firebase 金鑰
     const myFirebaseConfig = {
@@ -140,7 +140,17 @@
       }
     };
 
-    // --- 登入與註冊畫面元件 (支援帶有超級密碼驗證的重設密碼) ---
+    // --- 共用 Loading 畫面元件 ---
+    const LoadingScreen = ({ text }) => (
+      <div className="w-full h-[100dvh] flex items-center justify-center bg-gray-100 font-sans text-gray-900">
+         <div className="flex flex-col items-center gap-4 text-indigo-600 bg-white p-8 rounded-[2rem] shadow-lg border border-gray-100">
+            <Navigation size={40} className="animate-bounce" />
+            <p className="text-sm font-bold opacity-80 tracking-wider">{text}</p>
+         </div>
+      </div>
+    );
+
+    // --- 登入與註冊畫面元件 ---
     const AuthScreen = ({ appState, onSetup, onLoginAdmin, onGuest, onResetPasscode }) => {
       const [passcode, setPasscode] = useState('');
       const [error, setError] = useState('');
@@ -311,7 +321,7 @@
       const [user, setUser] = useState(null);
       const [authInitialized, setAuthInitialized] = useState(false);
       
-      // 應用程式狀態：loading(讀取中), setup(首次建立), login(登入/訪客選擇), ready(進入App)
+      // 應用程式狀態：loading(讀取中), setup(首次建立), loaded(完成共用資料讀取)
       const [appState, setAppState] = useState('loading'); 
       const [isAdmin, setIsAdmin] = useState(false);
       const [guestMode, setGuestMode] = useState(false);
@@ -328,12 +338,12 @@
       const [isPublicDataLoaded, setIsPublicDataLoaded] = useState(false);
       const [isPersonalDataLoaded, setIsPersonalDataLoaded] = useState(false);
 
-      // (1) 身份驗證初始化 (強制使用匿名登入)
+      // (1) 身份驗證初始化 (強制使用匿名登入，永不呼叫 signOut，藉此保留個人清單)
       useEffect(() => {
         if (!isCloudAvailable) {
           setUser({ uid: 'local-user' });
           setAuthInitialized(true);
-          setAppState('ready');
+          setAppState('loaded');
           setIsAdmin(true);
           setIsPublicDataLoaded(true);
           setIsPersonalDataLoaded(true);
@@ -360,7 +370,7 @@
         return () => unsubscribe();
       }, []);
 
-      // (2) 載入公開共用的雲端資料 (行程大綱)，並判斷權限
+      // (2) 載入公開共用的雲端資料 (行程大綱)
       useEffect(() => {
         if (!user || !isCloudAvailable) return;
         const sharedDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'travel_app_data', 'main_trip');
@@ -373,27 +383,15 @@
 
           if (docSnap.exists()) {
             const data = docSnap.data();
-            const admins = data.adminIds || [];
             setDbPasscode(data.passcode || '');
-
-            // 判斷當前使用者是否為管理員
-            if (admins.includes(user.uid)) {
-              setIsAdmin(true);
-              setAppState('ready');
-            } else {
-              setIsAdmin(false);
-              if (guestMode) {
-                setAppState('ready');
-              } else {
-                setAppState('login');
-              }
-            }
 
             setTrip(p => JSON.stringify(p) === JSON.stringify(data.trip) ? p : (data.trip || p));
             setFlight(p => JSON.stringify(p) === JSON.stringify(data.flight) ? p : (data.flight || p));
             setHotels(p => JSON.stringify(p) === JSON.stringify(data.hotels) ? p : (data.hotels || p));
             setSummary(p => JSON.stringify(p) === JSON.stringify(data.summary) ? p : (data.summary || p));
             setItinerary(p => JSON.stringify(p) === JSON.stringify(data.itinerary) ? p : (data.itinerary || p));
+            
+            setAppState('loaded');
           } else {
             // 雲端無資料 -> 進入建立模式
             setAppState('setup');
@@ -405,11 +403,11 @@
         });
 
         return () => unsubscribe();
-      }, [user, guestMode]);
+      }, [user]);
 
-      // (2.5) 載入個人專屬的準備清單資料
+      // (2.5) 載入個人專屬的準備清單資料 (依賴不變的 user.uid)
       useEffect(() => {
-        if (!user || !isCloudAvailable || (appState !== 'ready' && !guestMode)) return;
+        if (!user || !isCloudAvailable || !(isAdmin || guestMode)) return;
         const personalDocRef = doc(db, 'artifacts', appId, 'users', user.uid, 'travel_app_data', 'personal_prep');
         
         const unsubscribe = onSnapshot(personalDocRef, (docSnap) => {
@@ -434,11 +432,11 @@
         });
 
         return () => unsubscribe();
-      }, [user, appState, guestMode]);
+      }, [user, isAdmin, guestMode]);
 
       // (3) 自動背景存檔到雲端 (分離儲存邏輯)
       useEffect(() => {
-        if (!user || appState !== 'ready' || !isCloudAvailable) return;
+        if (!user || !(isAdmin || guestMode) || !isCloudAvailable) return;
         
         const timer = setTimeout(() => {
           // 如果是管理員，將行程資料存至公共路徑
@@ -456,13 +454,12 @@
         }, 1500);
 
         return () => clearTimeout(timer);
-      }, [trip, flight, hotels, notes, packing, summary, itinerary, user, appState, isAdmin]);
+      }, [trip, flight, hotels, notes, packing, summary, itinerary, user, isAdmin, guestMode]);
 
       // 首次建立旅程設定密碼
       const handleSetup = async (passcode) => {
         const sharedDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'travel_app_data', 'main_trip');
         await setDoc(sharedDocRef, {
-          adminIds: [user.uid],
           passcode: passcode,
           trip: initialTrip, flight: initialFlight, hotels: initialHotels,
           summary: initialSummary, itinerary: initialItinerary
@@ -474,18 +471,13 @@
         });
 
         setIsAdmin(true);
-        setAppState('ready');
+        setAppState('loaded');
       };
 
       // 輸入密碼登入為管理員
       const handleLoginAdmin = async (inputPasscode) => {
         if (inputPasscode === dbPasscode) {
-          const sharedDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'travel_app_data', 'main_trip');
-          await updateDoc(sharedDocRef, {
-            adminIds: arrayUnion(user.uid)
-          });
           setIsAdmin(true);
-          setAppState('ready');
         } else {
           throw new Error('密碼錯誤');
         }
@@ -501,18 +493,12 @@
           setDbPasscode(newPasscode);
       }
 
-      // 登出或重置狀態
-      const handleLogout = async () => {
-        if (window.confirm("確定要退出目前身份嗎？")) {
+      // 登出 (僅清除 React 身分狀態，不銷毀 Firebase 匿名階段，保留個人清單)
+      const handleLogout = () => {
+        if (window.confirm("確定要登出並返回首頁嗎？(您的專屬清單會安全保留在設備中)")) {
           setGuestMode(false);
           setIsAdmin(false);
-          setAppState('loading');
-          setIsPublicDataLoaded(false);
           setIsPersonalDataLoaded(false);
-          if (isCloudAvailable) {
-            await signOut(auth); // 觸發重新取得匿名 ID
-            window.location.reload();
-          }
         }
       };
 
@@ -529,19 +515,20 @@
       };
 
       // --- 畫面渲染分支 ---
-      if (authInitialized && (appState === 'setup' || appState === 'login')) {
-        return <AuthScreen appState={appState} onSetup={handleSetup} onLoginAdmin={handleLoginAdmin} onGuest={() => setGuestMode(true)} onResetPasscode={handleResetPasscode} />;
+      if (!authInitialized || appState === 'loading' || !isPublicDataLoaded) {
+        return <LoadingScreen text="正在載入旅程空間..." />;
       }
 
-      if (!authInitialized || appState === 'loading' || !isPublicDataLoaded || (appState === 'ready' && !isPersonalDataLoaded)) {
-        return (
-          <div className="w-full h-[100dvh] flex items-center justify-center bg-gray-100 font-sans text-gray-900">
-             <div className="flex flex-col items-center gap-4 text-indigo-600 bg-white p-8 rounded-[2rem] shadow-lg border border-gray-100">
-                <Navigation size={40} className="animate-bounce" />
-                <p className="text-sm font-bold opacity-80 tracking-wider">正在載入旅程空間...</p>
-             </div>
-          </div>
-        );
+      if (appState === 'setup') {
+        return <AuthScreen appState="setup" onSetup={handleSetup} />;
+      }
+
+      if (!isAdmin && !guestMode) {
+        return <AuthScreen appState="login" onLoginAdmin={handleLoginAdmin} onGuest={() => setGuestMode(true)} onResetPasscode={handleResetPasscode} />;
+      }
+
+      if (!isPersonalDataLoaded) {
+        return <LoadingScreen text="正在載入專屬準備清單..." />;
       }
 
       const handleAddDay = () => {
