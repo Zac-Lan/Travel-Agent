@@ -59,8 +59,8 @@
 
     // --- Firebase 雲端環境設定 ---
     import { initializeApp } from 'firebase/app';
-    import { getAuth, signInWithCustomToken, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from 'firebase/auth';
-    import { getFirestore, doc, onSnapshot, setDoc } from 'firebase/firestore';
+    import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, signOut } from 'firebase/auth';
+    import { getFirestore, doc, onSnapshot, setDoc, updateDoc, arrayUnion } from 'firebase/firestore';
 
     // 💡 GitHub Pages 部署請在此填入 Firebase 金鑰
     const myFirebaseConfig = {
@@ -140,11 +140,9 @@
       }
     };
 
-    // --- 登入與註冊畫面元件 ---
-    const AuthScreen = ({ onLogin }) => {
-      const [isRegister, setIsRegister] = useState(false);
-      const [email, setEmail] = useState('');
-      const [password, setPassword] = useState('');
+    // --- 登入與註冊畫面元件 (改為「通關密碼」機制，支援所有環境) ---
+    const AuthScreen = ({ appState, onSetup, onLoginAdmin, onGuest }) => {
+      const [passcode, setPasscode] = useState('');
       const [error, setError] = useState('');
       const [loading, setLoading] = useState(false);
 
@@ -153,18 +151,15 @@
         setError('');
         setLoading(true);
         try {
-          if (isRegister) {
-            await createUserWithEmailAndPassword(auth, email, password);
-          } else {
-            await signInWithEmailAndPassword(auth, email, password);
+          if (appState === 'setup') {
+            if (passcode.length < 4) throw new Error('密碼長度至少需要 4 個字元');
+            await onSetup(passcode);
+          } else if (appState === 'login') {
+            if (!passcode) throw new Error('請輸入管理員密碼');
+            await onLoginAdmin(passcode);
           }
-          // 登入成功由 onAuthStateChanged 處理
         } catch (err) {
-          let errorMsg = "發生錯誤，請稍後再試";
-          if (err.code === 'auth/email-already-in-use') errorMsg = "此 Email 已經註冊過，請直接登入";
-          if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') errorMsg = "Email 或密碼錯誤";
-          if (err.code === 'auth/weak-password') errorMsg = "密碼長度至少需要 6 個字元";
-          setError(errorMsg);
+          setError(err.message || "密碼錯誤或發生異常");
         } finally {
           setLoading(false);
         }
@@ -180,39 +175,42 @@
               </div>
             </div>
             <h2 className="text-2xl font-bold text-gray-800 mb-2 text-center">
-              {isRegister ? '註冊旅程帳號' : '登入旅行手冊'}
+              {appState === 'setup' ? '初始化旅程空間' : '登入旅行手冊'}
             </h2>
             <p className="text-center text-sm text-gray-500 mb-6">
-              {isRegister ? '建立帳號以共同編輯與檢視這趟旅程' : '請登入您的帳號以繼續'}
+              {appState === 'setup' ? '為這趟旅程設定一組「管理員密碼」' : '輸入密碼以編輯行程，或以訪客身份進入'}
             </p>
             
             {error && <div className="bg-red-50 text-red-500 p-3 rounded-xl text-sm mb-4 border border-red-100 text-center font-medium">{error}</div>}
             
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-gray-500 mb-1 ml-1">電子郵件</label>
-                <div className="relative">
-                  <User size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                  <input type="email" value={email} onChange={e=>setEmail(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors" placeholder="輸入您的 Email" required />
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-500 mb-1 ml-1">密碼</label>
+                <label className="block text-xs font-bold text-gray-500 mb-1 ml-1">
+                  {appState === 'setup' ? '設定管理員密碼' : '管理員密碼'}
+                </label>
                 <div className="relative">
                   <Lock size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                  <input type="password" value={password} onChange={e=>setPassword(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors" placeholder="輸入 6 位以上密碼" required />
+                  <input type="password" value={passcode} onChange={e=>setPasscode(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors" placeholder={appState === 'setup' ? "至少 4 個字元" : "請輸入密碼"} />
                 </div>
               </div>
               <button type="submit" disabled={loading} className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700 transition-colors mt-2 shadow-md shadow-indigo-200 flex justify-center">
-                {loading ? <span className="animate-pulse">處理中...</span> : (isRegister ? '註冊並登入' : '登入')}
+                {loading ? <span className="animate-pulse">處理中...</span> : (appState === 'setup' ? '創建旅程' : '登入管理員')}
               </button>
             </form>
 
-            <div className="mt-6 text-center">
-              <button onClick={() => { setIsRegister(!isRegister); setError(''); }} className="text-sm text-gray-500 hover:text-indigo-600 font-medium transition-colors">
-                {isRegister ? '已經有帳號了？點此登入' : '還沒有帳號？點此註冊'}
-              </button>
-            </div>
+            {appState === 'login' && (
+              <div className="mt-6 text-center">
+                <div className="relative flex py-2 items-center">
+                  <div className="flex-grow border-t border-gray-200"></div>
+                  <span className="flex-shrink-0 mx-4 text-gray-400 text-xs">或</span>
+                  <div className="flex-grow border-t border-gray-200"></div>
+                </div>
+                <button onClick={onGuest} type="button" className="w-full mt-2 py-3 bg-white border-2 border-gray-200 text-gray-600 rounded-xl font-bold hover:bg-gray-50 transition-colors flex items-center justify-center gap-2">
+                  <User size={18} /> 以訪客身份進入
+                </button>
+                <p className="text-[10px] text-gray-400 mt-2">訪客僅能查看行程與打勾準備清單</p>
+              </div>
+            )}
           </div>
         </div>
       );
@@ -224,11 +222,12 @@
       
       const [user, setUser] = useState(null);
       const [authInitialized, setAuthInitialized] = useState(false);
-      const [isDataLoaded, setIsDataLoaded] = useState(false);
       
-      // 權限判定：是否有管理員權限
-      const [ownerId, setOwnerId] = useState(null);
-      const isAdmin = user && ownerId === user.uid;
+      // 應用程式狀態：loading(讀取中), setup(首次建立), login(登入/訪客選擇), ready(進入App)
+      const [appState, setAppState] = useState('loading'); 
+      const [isAdmin, setIsAdmin] = useState(false);
+      const [guestMode, setGuestMode] = useState(false);
+      const [dbPasscode, setDbPasscode] = useState('');
 
       const [trip, setTrip] = useState(initialTrip);
       const [flight, setFlight] = useState(initialFlight);
@@ -238,25 +237,25 @@
       const [summary, setSummary] = useState(initialSummary);
       const [itinerary, setItinerary] = useState(initialItinerary);
 
-      // (1) 身份驗證初始化
+      // (1) 身份驗證初始化 (強制使用匿名登入，避免 Email/Password 模組無權限問題)
       useEffect(() => {
         if (!isCloudAvailable) {
-          // 本地開發模擬模式
-          setUser({ uid: 'local-user', email: 'local@test.com' });
+          setUser({ uid: 'local-user' });
           setAuthInitialized(true);
-          setIsDataLoaded(true);
-          setOwnerId('local-user');
+          setAppState('ready');
+          setIsAdmin(true);
           return;
         }
 
         const initAuth = async () => {
           try {
-            // 如果是 Canvas 環境帶有 token，自動登入
             if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
               await signInWithCustomToken(auth, __initial_auth_token);
+            } else {
+              await signInAnonymously(auth);
             }
           } catch (e) {
-            console.error("Token 登入失敗:", e);
+            console.error("Auth 驗證錯誤:", e);
           }
         };
         initAuth();
@@ -268,20 +267,32 @@
         return () => unsubscribe();
       }, []);
 
-      // (2) 載入公開共用的雲端資料
+      // (2) 載入公開共用的雲端資料，並判斷權限
       useEffect(() => {
         if (!user || !isCloudAvailable) return;
-        // 共用路徑：所有帳號都會存取並讀寫同一個文件
         const sharedDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'travel_app_data', 'main_trip');
         
         const unsubscribe = onSnapshot(sharedDocRef, (docSnap) => {
-          if (docSnap.metadata.hasPendingWrites) {
-            if (!isDataLoaded) setIsDataLoaded(true);
-            return; 
-          }
+          if (docSnap.metadata.hasPendingWrites) return; 
+
           if (docSnap.exists()) {
             const data = docSnap.data();
-            setOwnerId(data.ownerId); // 記錄誰是創建者(管理員)
+            const admins = data.adminIds || [];
+            setDbPasscode(data.passcode || '');
+
+            // 判斷當前使用者是否為管理員
+            if (admins.includes(user.uid)) {
+              setIsAdmin(true);
+              setAppState('ready');
+            } else {
+              setIsAdmin(false);
+              if (guestMode) {
+                setAppState('ready');
+              } else {
+                setAppState('login');
+              }
+            }
+
             setTrip(p => JSON.stringify(p) === JSON.stringify(data.trip) ? p : (data.trip || p));
             setFlight(p => JSON.stringify(p) === JSON.stringify(data.flight) ? p : (data.flight || p));
             setHotels(p => JSON.stringify(p) === JSON.stringify(data.hotels) ? p : (data.hotels || p));
@@ -290,26 +301,19 @@
             setSummary(p => JSON.stringify(p) === JSON.stringify(data.summary) ? p : (data.summary || p));
             setItinerary(p => JSON.stringify(p) === JSON.stringify(data.itinerary) ? p : (data.itinerary || p));
           } else {
-            // 第一次載入且文件不存在：目前帳號成為 Admin，並寫入預設資料
-            setOwnerId(user.uid);
-            setDoc(sharedDocRef, {
-              ownerId: user.uid,
-              trip: initialTrip, flight: initialFlight, hotels: initialHotels,
-              notes: initialNotes, packing: initialPacking, summary: initialSummary, itinerary: initialItinerary
-            });
+            // 雲端無資料 -> 進入建立模式
+            setAppState('setup');
           }
-          setIsDataLoaded(true);
         }, (error) => {
           console.error("雲端讀取錯誤:", error);
-          setIsDataLoaded(true);
         });
 
         return () => unsubscribe();
-      }, [user]);
+      }, [user, guestMode]);
 
       // (3) 自動背景存檔到雲端
       useEffect(() => {
-        if (!user || !isDataLoaded || !isCloudAvailable) return;
+        if (!user || appState !== 'ready' || !isCloudAvailable) return;
         const timer = setTimeout(() => {
           const sharedDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'travel_app_data', 'main_trip');
           
@@ -323,32 +327,75 @@
         }, 1500);
 
         return () => clearTimeout(timer);
-      }, [trip, flight, hotels, notes, packing, summary, itinerary, user, isDataLoaded, isAdmin]);
+      }, [trip, flight, hotels, notes, packing, summary, itinerary, user, appState, isAdmin]);
 
-      // --- 若未登入，顯示登入畫面 ---
-      if (authInitialized && !user) {
-        return <AuthScreen onLogin={setUser} />;
+      // 首次建立旅程設定密碼
+      const handleSetup = async (passcode) => {
+        const sharedDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'travel_app_data', 'main_trip');
+        await setDoc(sharedDocRef, {
+          adminIds: [user.uid],
+          passcode: passcode,
+          trip: initialTrip, flight: initialFlight, hotels: initialHotels,
+          notes: initialNotes, packing: initialPacking, summary: initialSummary, itinerary: initialItinerary
+        });
+        setIsAdmin(true);
+        setAppState('ready');
+      };
+
+      // 輸入密碼登入為管理員
+      const handleLoginAdmin = async (inputPasscode) => {
+        if (inputPasscode === dbPasscode) {
+          const sharedDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'travel_app_data', 'main_trip');
+          await updateDoc(sharedDocRef, {
+            adminIds: arrayUnion(user.uid)
+          });
+          setIsAdmin(true);
+          setAppState('ready');
+        } else {
+          throw new Error('密碼錯誤');
+        }
+      };
+
+      // 登出或重置狀態
+      const handleLogout = async () => {
+        if (window.confirm("確定要退出目前身份嗎？")) {
+          setGuestMode(false);
+          setIsAdmin(false);
+          setAppState('loading');
+          if (isCloudAvailable) {
+            await signOut(auth); // 觸發重新取得匿名 ID
+            window.location.reload();
+          }
+        }
+      };
+
+      const handleResetData = () => {
+        if (window.confirm("確定要重置所有資料嗎？這將會清除雲端的所有修改並還原回預設的杭州範例。")) {
+          setTrip(initialTrip);
+          setFlight(initialFlight);
+          setHotels(initialHotels);
+          setNotes(initialNotes);
+          setPacking(initialPacking);
+          setSummary(initialSummary);
+          setItinerary(initialItinerary);
+        }
+      };
+
+      // --- 畫面渲染分支 ---
+      if (authInitialized && (appState === 'setup' || appState === 'login')) {
+        return <AuthScreen appState={appState} onSetup={handleSetup} onLoginAdmin={handleLoginAdmin} onGuest={() => setGuestMode(true)} />;
       }
 
-      // --- 若登入了但資料還沒抓好，顯示 Loading ---
-      if (authInitialized && user && !isDataLoaded) {
+      if (!authInitialized || appState === 'loading') {
         return (
           <div className="w-full h-[100dvh] flex items-center justify-center bg-gray-100 font-sans text-gray-900">
              <div className="flex flex-col items-center gap-4 text-indigo-600 bg-white p-8 rounded-[2rem] shadow-lg border border-gray-100">
                 <Navigation size={40} className="animate-bounce" />
-                <p className="text-sm font-bold opacity-80 tracking-wider">正在載入共享旅程...</p>
+                <p className="text-sm font-bold opacity-80 tracking-wider">正在載入旅程空間...</p>
              </div>
           </div>
         );
       }
-
-      // 登出功能
-      const handleLogout = async () => {
-        if (isCloudAvailable && window.confirm("確定要登出嗎？")) {
-          await signOut(auth);
-          setIsDataLoaded(false);
-        }
-      };
 
       const handleAddDay = () => {
         const nextDayNum = summary.length > 0 ? summary.length + 1 : 1;
@@ -644,6 +691,14 @@
                   </div>
                 )}
               </section>
+              
+              {isAdmin && (
+                <div className="pt-6 border-t border-gray-200 flex justify-center pb-6">
+                  <button onClick={handleResetData} className="text-xs text-gray-400 hover:text-red-500 flex items-center transition-colors">
+                    <RotateCcw size={14} className="mr-1" /> 恢復預設範例資料 (清除雲端儲存)
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         );
