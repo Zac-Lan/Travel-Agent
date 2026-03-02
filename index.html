@@ -140,12 +140,16 @@
       }
     };
 
-    // --- 登入與註冊畫面元件 (支援重設密碼) ---
+    // --- 登入與註冊畫面元件 (支援帶有超級密碼驗證的重設密碼) ---
     const AuthScreen = ({ appState, onSetup, onLoginAdmin, onGuest, onResetPasscode }) => {
       const [passcode, setPasscode] = useState('');
       const [error, setError] = useState('');
       const [loading, setLoading] = useState(false);
+      
+      // 重設密碼相關狀態
       const [isResetting, setIsResetting] = useState(false);
+      const [isMasterVerified, setIsMasterVerified] = useState(false);
+      const [masterPasscode, setMasterPasscode] = useState('');
       const [newPasscode, setNewPasscode] = useState('');
       const [confirmPasscode, setConfirmPasscode] = useState('');
 
@@ -155,15 +159,29 @@
         setLoading(true);
         try {
           if (isResetting) {
-            if (newPasscode.length < 4) throw new Error('密碼長度至少需要 4 個字元');
-            if (newPasscode !== confirmPasscode) throw new Error('兩次輸入的密碼不一致');
-            await onResetPasscode(newPasscode);
-            setIsResetting(false);
-            setPasscode('');
-            setNewPasscode('');
-            setConfirmPasscode('');
-            setError('密碼重設成功，請重新登入');
-            setTimeout(() => setError(''), 3000);
+            // 驗證超級密碼階段
+            if (!isMasterVerified) {
+              if (masterPasscode === 'admin0313') {
+                setIsMasterVerified(true);
+                setError('');
+              } else {
+                throw new Error('系統安全密碼錯誤，拒絕存取');
+              }
+            } 
+            // 設定新密碼階段
+            else {
+              if (newPasscode.length < 4) throw new Error('密碼長度至少需要 4 個字元');
+              if (newPasscode !== confirmPasscode) throw new Error('兩次輸入的密碼不一致');
+              await onResetPasscode(newPasscode);
+              setIsResetting(false);
+              setIsMasterVerified(false);
+              setPasscode('');
+              setMasterPasscode('');
+              setNewPasscode('');
+              setConfirmPasscode('');
+              setError('密碼重設成功，請重新登入');
+              setTimeout(() => setError(''), 3000);
+            }
           } else if (appState === 'setup') {
             if (passcode.length < 4) throw new Error('密碼長度至少需要 4 個字元');
             await onSetup(passcode);
@@ -176,6 +194,15 @@
         } finally {
           setLoading(false);
         }
+      };
+
+      const handleCancelReset = () => {
+        setIsResetting(false);
+        setIsMasterVerified(false);
+        setMasterPasscode('');
+        setNewPasscode('');
+        setConfirmPasscode('');
+        setError('');
       };
 
       return (
@@ -191,29 +218,41 @@
               {isResetting ? '重設管理員密碼' : (appState === 'setup' ? '初始化旅程空間' : '登入旅行手冊')}
             </h2>
             <p className="text-center text-sm text-gray-500 mb-6">
-              {isResetting ? '請設定一組新的密碼' : (appState === 'setup' ? '為這趟旅程設定一組「管理員密碼」' : '輸入密碼以編輯行程，或以訪客身份進入')}
+              {isResetting 
+                ? (isMasterVerified ? '請設定一組新的密碼' : '請先輸入系統安全密碼以驗證身份') 
+                : (appState === 'setup' ? '為這趟旅程設定一組「管理員密碼」' : '輸入密碼以編輯行程，或以訪客身份進入')}
             </p>
             
             {error && <div className={`bg-${error.includes('成功') ? 'emerald' : 'red'}-50 text-${error.includes('成功') ? 'emerald' : 'red'}-500 p-3 rounded-xl text-sm mb-4 border border-${error.includes('成功') ? 'emerald' : 'red'}-100 text-center font-medium`}>{error}</div>}
             
             <form onSubmit={handleSubmit} className="space-y-4">
               {isResetting ? (
-                <>
+                !isMasterVerified ? (
                   <div>
-                    <label className="block text-xs font-bold text-gray-500 mb-1 ml-1">新密碼</label>
+                    <label className="block text-xs font-bold text-gray-500 mb-1 ml-1">系統安全密碼</label>
                     <div className="relative">
                       <Lock size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                      <input type="password" value={newPasscode} onChange={e=>setNewPasscode(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors" placeholder="至少 4 個字元" />
+                      <input type="password" value={masterPasscode} onChange={e=>setMasterPasscode(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors" placeholder="請輸入系統安全密碼" />
                     </div>
                   </div>
-                  <div>
-                    <label className="block text-xs font-bold text-gray-500 mb-1 ml-1">確認新密碼</label>
-                    <div className="relative">
-                      <Lock size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                      <input type="password" value={confirmPasscode} onChange={e=>setConfirmPasscode(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors" placeholder="再次輸入新密碼" />
+                ) : (
+                  <>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-500 mb-1 ml-1">新密碼</label>
+                      <div className="relative">
+                        <Lock size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <input type="password" value={newPasscode} onChange={e=>setNewPasscode(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors" placeholder="至少 4 個字元" />
+                      </div>
                     </div>
-                  </div>
-                </>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-500 mb-1 ml-1">確認新密碼</label>
+                      <div className="relative">
+                        <Lock size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <input type="password" value={confirmPasscode} onChange={e=>setConfirmPasscode(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors" placeholder="再次輸入新密碼" />
+                      </div>
+                    </div>
+                  </>
+                )
               ) : (
                 <div>
                   <label className="block text-xs font-bold text-gray-500 mb-1 ml-1">
@@ -227,7 +266,7 @@
               )}
               
               <button type="submit" disabled={loading} className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700 transition-colors mt-2 shadow-md shadow-indigo-200 flex justify-center">
-                {loading ? <span className="animate-pulse">處理中...</span> : (isResetting ? '確認重設' : (appState === 'setup' ? '創建旅程' : '登入管理員'))}
+                {loading ? <span className="animate-pulse">處理中...</span> : (isResetting ? (isMasterVerified ? '確認重設' : '驗證安全密碼') : (appState === 'setup' ? '創建旅程' : '登入管理員'))}
               </button>
             </form>
 
@@ -241,7 +280,7 @@
 
             {isResetting && (
                <div className="mt-4 text-center">
-                <button onClick={() => { setIsResetting(false); setError(''); }} type="button" className="text-xs text-gray-500 hover:text-gray-700 font-medium transition-colors">
+                <button onClick={handleCancelReset} type="button" className="text-xs text-gray-500 hover:text-gray-700 font-medium transition-colors">
                   返回登入
                 </button>
               </div>
