@@ -59,8 +59,8 @@
 
     // --- Firebase 雲端環境設定 ---
     import { initializeApp } from 'firebase/app';
-    import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-    import { getFirestore, doc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
+    import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, signOut } from 'firebase/auth';
+    import { getFirestore, doc, onSnapshot, setDoc, updateDoc, arrayUnion } from 'firebase/firestore';
 
     // 💡 GitHub Pages 部署請在此填入 Firebase 金鑰
     const myFirebaseConfig = {
@@ -338,6 +338,9 @@
 
       const [isPublicDataLoaded, setIsPublicDataLoaded] = useState(false);
       const [isPersonalDataLoaded, setIsPersonalDataLoaded] = useState(false);
+
+      // 將 selectedDay 提升到 App 層級
+      const [selectedItineraryDay, setSelectedItineraryDay] = useState(1);
 
       // (1) 身份驗證初始化 (強制使用匿名登入，永不呼叫 signOut，藉此保留個人清單)
       useEffect(() => {
@@ -964,15 +967,14 @@
 
       // 4. 每日細流
       const ItineraryTab = () => {
-        const [selectedDay, setSelectedDay] = useState(1);
         const [isAdding, setIsAdding] = useState(false);
         const [newAct, setNewAct] = useState({ time: '', title: '', desc: '', transportToNext: '', transportIcon: 'walk' });
         const [editingActId, setEditingActId] = useState(null);
         const [editActData, setEditActData] = useState({ time: '', title: '', desc: '', transportToNext: '', transportIcon: 'walk' });
 
         useEffect(() => {
-          if (summary.length > 0 && !summary.find(s => s.day === selectedDay)) { setSelectedDay(summary[0].day); }
-        }, [summary, selectedDay]);
+          if (summary.length > 0 && !summary.find(s => s.day === selectedItineraryDay)) { setSelectedItineraryDay(summary[0].day); }
+        }, [summary]);
 
         if (summary.length === 0) {
           return (
@@ -984,7 +986,7 @@
           );
         }
 
-        const currentSummary = summary.find(s => s.day === selectedDay) || summary[0];
+        const currentSummary = summary.find(s => s.day === selectedItineraryDay) || summary[0];
         const currentDayData = itinerary.find(d => d.day === currentSummary.day) || { day: currentSummary.day, activities: [] };
 
         const handleAddActivity = () => {
@@ -1031,7 +1033,7 @@
               {summary.map(day => (
                 <button
                   key={day.day}
-                  onClick={() => setSelectedDay(day.day)}
+                  onClick={() => setSelectedItineraryDay(day.day)}
                   className={`flex-shrink-0 px-4 py-2 rounded-full text-sm font-bold transition-all ${
                     currentSummary.day === day.day ? 'bg-indigo-600 text-white shadow-md' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
                   }`}
