@@ -59,7 +59,7 @@
 
     // --- Firebase 雲端環境設定 ---
     import { initializeApp } from 'firebase/app';
-    import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, signOut } from 'firebase/auth';
+    import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, signOut, signInWithEmailAndPassword, EmailAuthProvider, linkWithCredential } from 'firebase/auth';
     import { getFirestore, doc, onSnapshot, setDoc, updateDoc, arrayUnion } from 'firebase/firestore';
 
     // 💡 GitHub Pages 部署請在此填入 Firebase 金鑰
@@ -164,13 +164,17 @@
       const [newPasscode, setNewPasscode] = useState('');
       const [confirmPasscode, setConfirmPasscode] = useState('');
 
+      // Email 註冊登入狀態 (改為自訂帳號)
+      const [emailMode, setEmailMode] = useState('none'); // 'none' | 'login' | 'register'
+      const [username, setUsername] = useState('');
+      const [emailPassword, setEmailPassword] = useState('');
+
       const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
         setLoading(true);
         try {
           if (isResetting) {
-            // 驗證超級密碼階段
             if (!isMasterVerified) {
               if (masterPasscode === 'admin0313') {
                 setIsMasterVerified(true);
@@ -178,9 +182,7 @@
               } else {
                 throw new Error('系統安全密碼錯誤，拒絕存取');
               }
-            } 
-            // 設定新密碼階段
-            else {
+            } else {
               if (newPasscode.length < 4) throw new Error('密碼長度至少需要 4 個字元');
               if (newPasscode !== confirmPasscode) throw new Error('兩次輸入的密碼不一致');
               await onResetPasscode(newPasscode);
@@ -207,6 +209,44 @@
         }
       };
 
+      const handleEmailSubmit = async (e) => {
+        e.preventDefault();
+        setError('');
+        setLoading(true);
+        
+        // 驗證自訂帳號格式 (例如只能是英數字，至少3碼)
+        if (username.length < 3 || !/^[a-zA-Z0-9_]+$/.test(username)) {
+           setError("帳號必須為3碼以上的英文字母、數字或底線");
+           setLoading(false);
+           return;
+        }
+
+        // 將自訂帳號轉換成 Firebase 接受的假 Email 格式
+        const virtualEmail = `${username}@travelapp.local`;
+
+        try {
+          if (emailMode === 'login') {
+            await signInWithEmailAndPassword(auth, virtualEmail, emailPassword);
+            onGuest(); // 成功後直接以該帳號身分進入
+          } else if (emailMode === 'register') {
+            // 註冊時，將當前已配發的匿名帳號「綁定」給這個假 Email，保留原本的清單
+            const credential = EmailAuthProvider.credential(virtualEmail, emailPassword);
+            await linkWithCredential(auth.currentUser, credential);
+            onGuest();
+          }
+        } catch (err) {
+          let errorMsg = "發生錯誤，請稍後再試";
+          if (err.code === 'auth/email-already-in-use') errorMsg = "此帳號已經被註冊過，請更換一個或切換至登入";
+          if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') errorMsg = "帳號或密碼錯誤";
+          if (err.code === 'auth/weak-password') errorMsg = "密碼長度至少需要 6 個字元";
+          if (err.code === 'auth/credential-already-in-use') errorMsg = "此帳號已與其他身分綁定";
+          setError(errorMsg);
+          console.error(err);
+        } finally {
+          setLoading(false);
+        }
+      };
+
       const handleCancelReset = () => {
         setIsResetting(false);
         setIsMasterVerified(false);
@@ -217,8 +257,8 @@
       };
 
       return (
-        <div className="w-full h-[100dvh] flex flex-col items-center justify-center p-6 bg-gray-100 font-sans text-gray-900">
-          <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm border border-gray-100 relative overflow-hidden">
+        <div className="w-full h-[100dvh] flex flex-col items-center justify-center p-6 bg-gray-100 font-sans text-gray-900 overflow-y-auto">
+          <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm border border-gray-100 relative overflow-hidden my-auto">
             <div className="absolute top-0 inset-x-0 h-2 bg-indigo-600"></div>
             <div className="flex justify-center mb-6">
               <div className="bg-indigo-100 p-3 rounded-2xl text-indigo-600">
@@ -236,52 +276,54 @@
             
             {error && <div className={`bg-${error.includes('成功') ? 'emerald' : 'red'}-50 text-${error.includes('成功') ? 'emerald' : 'red'}-500 p-3 rounded-xl text-sm mb-4 border border-${error.includes('成功') ? 'emerald' : 'red'}-100 text-center font-medium`}>{error}</div>}
             
-            <form onSubmit={handleSubmit} className="space-y-4">
-              {isResetting ? (
-                !isMasterVerified ? (
+            {emailMode === 'none' && (
+              <form onSubmit={handleSubmit} className="space-y-4">
+                {isResetting ? (
+                  !isMasterVerified ? (
+                    <div>
+                      <label className="block text-xs font-bold text-gray-500 mb-1 ml-1">系統安全密碼</label>
+                      <div className="relative">
+                        <Lock size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <input type="password" value={masterPasscode} onChange={e=>setMasterPasscode(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors" placeholder="請輸入系統安全密碼" />
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div>
+                        <label className="block text-xs font-bold text-gray-500 mb-1 ml-1">新密碼</label>
+                        <div className="relative">
+                          <Lock size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                          <input type="password" value={newPasscode} onChange={e=>setNewPasscode(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors" placeholder="至少 4 個字元" />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-gray-500 mb-1 ml-1">確認新密碼</label>
+                        <div className="relative">
+                          <Lock size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                          <input type="password" value={confirmPasscode} onChange={e=>setConfirmPasscode(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors" placeholder="再次輸入新密碼" />
+                        </div>
+                      </div>
+                    </>
+                  )
+                ) : (
                   <div>
-                    <label className="block text-xs font-bold text-gray-500 mb-1 ml-1">系統安全密碼</label>
+                    <label className="block text-xs font-bold text-gray-500 mb-1 ml-1">
+                      {appState === 'setup' ? '設定管理員密碼' : '管理員密碼'}
+                    </label>
                     <div className="relative">
                       <Lock size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                      <input type="password" value={masterPasscode} onChange={e=>setMasterPasscode(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors" placeholder="請輸入系統安全密碼" />
+                      <input type="password" value={passcode} onChange={e=>setPasscode(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors" placeholder={appState === 'setup' ? "至少 4 個字元" : "請輸入密碼"} />
                     </div>
                   </div>
-                ) : (
-                  <>
-                    <div>
-                      <label className="block text-xs font-bold text-gray-500 mb-1 ml-1">新密碼</label>
-                      <div className="relative">
-                        <Lock size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                        <input type="password" value={newPasscode} onChange={e=>setNewPasscode(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors" placeholder="至少 4 個字元" />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-gray-500 mb-1 ml-1">確認新密碼</label>
-                      <div className="relative">
-                        <Lock size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                        <input type="password" value={confirmPasscode} onChange={e=>setConfirmPasscode(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors" placeholder="再次輸入新密碼" />
-                      </div>
-                    </div>
-                  </>
-                )
-              ) : (
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 mb-1 ml-1">
-                    {appState === 'setup' ? '設定管理員密碼' : '管理員密碼'}
-                  </label>
-                  <div className="relative">
-                    <Lock size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                    <input type="password" value={passcode} onChange={e=>setPasscode(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors" placeholder={appState === 'setup' ? "至少 4 個字元" : "請輸入密碼"} />
-                  </div>
-                </div>
-              )}
-              
-              <button type="submit" disabled={loading} className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700 transition-colors mt-2 shadow-md shadow-indigo-200 flex justify-center">
-                {loading ? <span className="animate-pulse">處理中...</span> : (isResetting ? (isMasterVerified ? '確認重設' : '驗證安全密碼') : (appState === 'setup' ? '創建旅程' : '登入管理員'))}
-              </button>
-            </form>
+                )}
+                
+                <button type="submit" disabled={loading} className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700 transition-colors mt-2 shadow-md shadow-indigo-200 flex justify-center">
+                  {loading ? <span className="animate-pulse">處理中...</span> : (isResetting ? (isMasterVerified ? '確認重設' : '驗證安全密碼') : (appState === 'setup' ? '創建旅程' : '登入管理員'))}
+                </button>
+              </form>
+            )}
 
-            {appState === 'login' && !isResetting && (
+            {appState === 'login' && !isResetting && emailMode === 'none' && (
               <div className="mt-4 text-center">
                 <button onClick={() => { setIsResetting(true); setError(''); }} type="button" className="text-xs text-indigo-500 hover:text-indigo-700 font-medium transition-colors">
                   忘記密碼？點此重設
@@ -289,7 +331,7 @@
               </div>
             )}
 
-            {isResetting && (
+            {isResetting && emailMode === 'none' && (
                <div className="mt-4 text-center">
                 <button onClick={handleCancelReset} type="button" className="text-xs text-gray-500 hover:text-gray-700 font-medium transition-colors">
                   返回登入
@@ -297,17 +339,48 @@
               </div>
             )}
 
+            {/* Email 與訪客登入區塊 */}
             {appState === 'login' && !isResetting && (
-              <div className="mt-6 text-center">
-                <div className="relative flex py-2 items-center">
+              <div className="mt-6">
+                <div className="relative flex py-2 items-center mb-4">
                   <div className="flex-grow border-t border-gray-200"></div>
-                  <span className="flex-shrink-0 mx-4 text-gray-400 text-xs">或</span>
+                  <span className="flex-shrink-0 mx-4 text-gray-400 text-xs">其他登入方式</span>
                   <div className="flex-grow border-t border-gray-200"></div>
                 </div>
-                <button onClick={onGuest} type="button" className="w-full mt-2 py-3 bg-white border-2 border-gray-200 text-gray-600 rounded-xl font-bold hover:bg-gray-50 transition-colors flex items-center justify-center gap-2">
-                  <User size={18} /> 以訪客身份進入
-                </button>
-                <p className="text-[10px] text-gray-400 mt-2">訪客可查看行程，並擁有專屬準備清單</p>
+
+                {emailMode === 'none' ? (
+                  <div className="space-y-3">
+                    <button onClick={() => {setEmailMode('login'); setError('');}} type="button" className="w-full py-3 bg-indigo-50 text-indigo-600 rounded-xl font-bold hover:bg-indigo-100 transition-colors flex items-center justify-center gap-2 text-sm">
+                      <User size={18} /> 使用自訂帳號登入 / 註冊
+                    </button>
+                    <button onClick={onGuest} type="button" className="w-full py-3 bg-white border border-gray-200 text-gray-500 rounded-xl font-bold hover:bg-gray-50 transition-colors flex items-center justify-center gap-2 text-sm">
+                      免登入，以匿名訪客進入
+                    </button>
+                  </div>
+                ) : (
+                  <form onSubmit={handleEmailSubmit} className="space-y-3 animate-fade-in bg-gray-50 p-4 rounded-2xl border border-gray-100">
+                    <h3 className="text-sm font-bold text-gray-700 text-center mb-2">
+                      {emailMode === 'login' ? '自訂帳號登入' : '註冊自訂帳號以綁定清單'}
+                    </h3>
+                    <input type="text" value={username} onChange={e=>setUsername(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="輸入您的專屬帳號 (例如: allen123)" required />
+                    <input type="password" value={emailPassword} onChange={e=>setEmailPassword(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="輸入密碼 (至少6碼)" required />
+                    
+                    <div className="flex gap-2 pt-1">
+                      <button type="submit" disabled={loading} className="flex-1 bg-indigo-600 text-white py-2 rounded-lg text-sm font-bold hover:bg-indigo-700 transition-colors flex justify-center">
+                        {loading ? <span className="animate-pulse">處理中...</span> : (emailMode === 'login' ? '登入' : '註冊')}
+                      </button>
+                      <button type="button" onClick={() => {setEmailMode('none'); setError('');}} className="px-3 bg-gray-200 text-gray-700 rounded-lg text-sm font-bold hover:bg-gray-300 transition-colors">
+                        取消
+                      </button>
+                    </div>
+                    
+                    <div className="text-center mt-2">
+                      <button type="button" onClick={() => {setEmailMode(emailMode === 'login' ? 'register' : 'login'); setError('');}} className="text-xs text-indigo-500 font-medium hover:underline">
+                        {emailMode === 'login' ? '沒有帳號？點此註冊' : '已有帳號？點此直接登入'}
+                      </button>
+                    </div>
+                  </form>
+                )}
               </div>
             )}
           </div>
@@ -322,7 +395,7 @@
       const [user, setUser] = useState(null);
       const [authInitialized, setAuthInitialized] = useState(false);
       
-      // 應用程式狀態：loading(讀取中), setup(首次建立), loaded(完成共用資料讀取)
+      // 應用程式狀態：loading(讀取中), setup(首次建立), login(登入/訪客選擇), ready(進入App)
       const [appState, setAppState] = useState('loading'); 
       const [isAdmin, setIsAdmin] = useState(false);
       const [guestMode, setGuestMode] = useState(false);
@@ -389,13 +462,26 @@
             const data = docSnap.data();
             setDbPasscode(data.passcode || '');
 
+            const admins = data.adminIds || [];
+            
+            // 判斷當前使用者是否為管理員
+            if (admins.includes(user.uid)) {
+              setIsAdmin(true);
+              setAppState('ready');
+            } else {
+              setIsAdmin(false);
+              if (guestMode) {
+                setAppState('ready');
+              } else {
+                setAppState('login');
+              }
+            }
+
             setTrip(p => JSON.stringify(p) === JSON.stringify(data.trip) ? p : (data.trip || p));
             setFlight(p => JSON.stringify(p) === JSON.stringify(data.flight) ? p : (data.flight || p));
             setHotels(p => JSON.stringify(p) === JSON.stringify(data.hotels) ? p : (data.hotels || p));
             setSummary(p => JSON.stringify(p) === JSON.stringify(data.summary) ? p : (data.summary || p));
             setItinerary(p => JSON.stringify(p) === JSON.stringify(data.itinerary) ? p : (data.itinerary || p));
-            
-            setAppState('loaded');
           } else {
             // 雲端無資料 -> 進入建立模式
             setAppState('setup');
@@ -407,7 +493,7 @@
         });
 
         return () => unsubscribe();
-      }, [user]);
+      }, [user, guestMode]);
 
       // (2.5) 載入個人專屬的準備清單資料 (依賴不變的 user.uid)
       useEffect(() => {
@@ -464,6 +550,7 @@
       const handleSetup = async (passcode) => {
         const sharedDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'travel_app_data', 'main_trip');
         await setDoc(sharedDocRef, {
+          adminIds: [user.uid],
           passcode: passcode,
           trip: initialTrip, flight: initialFlight, hotels: initialHotels,
           summary: initialSummary, itinerary: initialItinerary
@@ -475,13 +562,18 @@
         });
 
         setIsAdmin(true);
-        setAppState('loaded');
+        setAppState('ready');
       };
 
       // 輸入密碼登入為管理員
       const handleLoginAdmin = async (inputPasscode) => {
         if (inputPasscode === dbPasscode) {
+          const sharedDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'travel_app_data', 'main_trip');
+          await updateDoc(sharedDocRef, {
+            adminIds: arrayUnion(user.uid)
+          });
           setIsAdmin(true);
+          setAppState('ready');
         } else {
           throw new Error('密碼錯誤');
         }
@@ -497,12 +589,13 @@
           setDbPasscode(newPasscode);
       }
 
-      // 登出 (僅清除 React 身分狀態，不銷毀 Firebase 匿名階段，保留個人清單)
+      // 登出 (僅清除 React 身分狀態，不銷毀 Firebase，以保留個人清單及 Email 登入狀態)
       const handleLogout = () => {
-        if (window.confirm("確定要登出並返回首頁嗎？(您的專屬清單會安全保留在設備中)")) {
+        if (window.confirm("確定要登出並返回首頁嗎？(您的專屬清單會安全保留在設備或帳號中)")) {
           setGuestMode(false);
           setIsAdmin(false);
           setIsPersonalDataLoaded(false);
+          setAppState('login');
         }
       };
 
@@ -524,7 +617,7 @@
       }
 
       if (appState === 'setup') {
-        return <AuthScreen appState="setup" onSetup={handleSetup} />;
+        return <AuthScreen appState="setup" onSetup={handleSetup} onResetPasscode={handleResetPasscode} />;
       }
 
       if (!isAdmin && !guestMode) {
@@ -589,9 +682,9 @@
             {/* 帳號與權限狀態標籤 */}
             <div className="absolute top-4 left-4 z-50 flex items-center bg-black/40 backdrop-blur px-3 py-1.5 rounded-full text-white/90 text-xs font-medium border border-white/20 shadow-md">
               {isAdmin ? (
-                <><span className="w-2 h-2 rounded-full bg-emerald-400 mr-2 shadow-[0_0_5px_rgba(52,211,153,0.8)]"></span> 管理員模式</>
+                <><span className="w-2 h-2 rounded-full bg-emerald-400 mr-2 shadow-[0_0_5px_rgba(52,211,153,0.8)]"></span> 管理員模式 {user?.email && `(${user.email.split('@')[0]})`}</>
               ) : (
-                <><span className="w-2 h-2 rounded-full bg-amber-400 mr-2 shadow-[0_0_5px_rgba(251,191,36,0.8)]"></span> 訪客預覽模式</>
+                <><span className="w-2 h-2 rounded-full bg-amber-400 mr-2 shadow-[0_0_5px_rgba(251,191,36,0.8)]"></span> 訪客 {user?.email ? `(${user.email.split('@')[0]})` : '(匿名)'}</>
               )}
             </div>
             
