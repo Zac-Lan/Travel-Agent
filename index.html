@@ -54,7 +54,7 @@
     import { 
       Home, ListTodo, Map, CalendarDays, Plus, Trash2, CheckSquare, Square, 
       Navigation, Train, Plane, Bus, Car, Footprints, Pencil, PlaneTakeoff, 
-      PlaneLanding, Bed, Calendar, MapPin, Save, X, RotateCcw, LogOut, User, Lock, KeyRound
+      PlaneLanding, Bed, Calendar, MapPin, Save, X, RotateCcw, LogOut, User, Lock, KeyRound, Ship
     } from 'lucide-react';
 
     // --- Firebase 雲端環境設定 ---
@@ -136,6 +136,7 @@
         case 'bus': return <Bus size={16} />;
         case 'car': return <Car size={16} />;
         case 'walk': return <Footprints size={16} />;
+        case 'ship': return <Ship size={16} />;
         default: return <Navigation size={16} />;
       }
     };
@@ -1068,6 +1069,7 @@
                                   <option value="bus">巴士</option>
                                   <option value="car">汽車/計程車</option>
                                   <option value="plane">飛機</option>
+                                  <option value="ship">船</option>
                                 </select>
                                 <input type="text" placeholder="例如：搭乘地鐵轉乘公車 (約30分)" value={editActData.transportToNext} onChange={e => setEditActData({...editActData, transportToNext: e.target.value})} className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white" />
                               </div>
@@ -1129,6 +1131,7 @@
                           <option value="bus">巴士</option>
                           <option value="car">汽車/計程車</option>
                           <option value="plane">飛機</option>
+                          <option value="ship">船</option>
                         </select>
                         <input type="text" placeholder="例如：搭乘地鐵轉乘公車 (約30分)" value={newAct.transportToNext} onChange={e => setNewAct({...newAct, transportToNext: e.target.value})} className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-gray-200 text-sm" />
                       </div>
